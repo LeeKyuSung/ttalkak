@@ -1,6 +1,6 @@
 // MicRecorder — 메뉴 막대에서 좌클릭 한 번으로 마이크 녹음을 시작/중지한다.
 //
-// 저장 위치는 ~/Downloads. 파일은 .m4a(AAC) 이므로 그대로 /meetnote 에 넘기면 된다.
+// 저장 위치는 ~/Downloads. 파일은 .m4a(AAC) 이므로 Whisper 계열 전사 도구에 그대로 넘길 수 있다.
 
 import AppKit
 import AVFoundation
