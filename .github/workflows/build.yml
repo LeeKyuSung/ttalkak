@@ -1,0 +1,64 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          swiftc --version
+          xcrun --show-sdk-path --sdk macosx
+
+      # CI has no Apple Development certificate, so the build falls back to
+      # ad-hoc signing. That is fine here — we only care that it compiles and
+      # that the bundles are well formed.
+      - name: Build all three apps
+        env:
+          SIGN_ID: "-"
+        run: bash build.sh
+
+      - name: Verify bundles
+        run: |
+          set -euo pipefail
+          for a in AudioFix ThemeToggle MicRecorder; do
+            app="build/$a.app"
+            echo "--- $a ---"
+            test -x "$app/Contents/MacOS/$a"
+            plutil -lint "$app/Contents/Info.plist"
+            codesign --verify --strict "$app"
+          done
+
+      - name: MicRecorder must carry the audio-input entitlement
+        run: |
+          codesign -d --entitlements - build/MicRecorder.app 2>&1 \
+            | grep -q 'com.apple.security.device.audio-input'
+
+      - name: The other two must not request it
+        run: |
+          set -euo pipefail
+          for a in AudioFix ThemeToggle; do
+            if codesign -d --entitlements - "build/$a.app" 2>&1 \
+                 | grep -q 'com.apple.security.device.audio-input'; then
+              echo "$a should not request microphone access" >&2
+              exit 1
+            fi
+          done
+
+      # The bug this project exists to fix: launchctl cannot restart a system
+      # daemon while SIP is on. Make sure nobody reintroduces it.
+      - name: No launchctl in the restart path
+        run: |
+          if grep -rn 'launchctl' AudioFix/*.swift | grep -v '^\s*//' | grep -v '// '; then
+            echo "launchctl found outside comments — SIP blocks it, use killall" >&2
+            exit 1
+          fi

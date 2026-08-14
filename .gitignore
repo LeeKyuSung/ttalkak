@@ -1,0 +1,11 @@
+# 빌드 산출물
+build/
+
+# macOS
+.DS_Store
+
+# Xcode / SwiftPM (직접 쓰진 않지만 실수로 생겼을 때 대비)
+.build/
+*.xcuserstate
+xcuserdata/
+DerivedData/
