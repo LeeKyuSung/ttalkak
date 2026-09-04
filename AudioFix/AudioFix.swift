@@ -330,9 +330,11 @@ final class AudioFixDelegate: NSObject, NSApplicationDelegate {
 
         icon = StatusIcon()
         icon.state = { [weak self] in
+            // 스피커에 붙은 느낌표가 "소리에 문제가 있으면 여기"를 뜻한다.
+            // 제어 센터의 사운드 아이콘(speaker.wave.2)과 실루엣이 겹치지 않게 일부러 다른 심볼을 쓴다.
             let busy = self?.busy ?? false
-            return ("speaker.wave.2",
-                    busy ? "오디오 재시작 중…" : "오디오 재시작 — 클릭하면 바로 실행")
+            return busy ? IconLook("arrow.triangle.2.circlepath", "오디오 재시작 중…", weight: .bold)
+                        : IconLook("speaker.badge.exclamationmark", "오디오 재시작 — 클릭하면 바로 실행", weight: .bold)
         }
         icon.onClick = { [weak self] in self?.restart() }
         icon.buildMenu = { [weak self] in self?.menu() ?? NSMenu() }
@@ -434,6 +436,7 @@ final class AudioFixDelegate: NSObject, NSApplicationDelegate {
         }
 
         m.addItem(.separator())
+        addPinRightItem(m, icon, target: self, #selector(togglePinRight))
         addItem(m, "로그인 시 자동 실행", target: self, #selector(toggleLogin),
                 checked: LoginItem.cachedStatus() == .enabled)
         m.addItem(.separator())
@@ -496,6 +499,10 @@ final class AudioFixDelegate: NSObject, NSApplicationDelegate {
             failAlert("해제하지 못했습니다", errText(error))
         }
     }
+
+    /// 노치 맥에서 외장 모니터를 빼면 메뉴 막대가 좁아져 왼쪽 항목부터 사라진다.
+    /// 켜 두면 매 실행마다 오른쪽 끝(제어 센터 옆)으로 간다. 끄면 켜기 전 자리로 돌아간다.
+    @objc private func togglePinRight() { icon.togglePinnedToRight() }
 
     @objc private func toggleLogin() { LoginItem.toggleFromMenu() }
 

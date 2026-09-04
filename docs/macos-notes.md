@@ -343,3 +343,216 @@ swiftc -parse-as-library -O -whole-module-optimization \
 - `LSUIElement`를 `true`로 두면 `setActivationPolicy(.accessory)`를 호출할 필요가 없다.
 - `NSMicrophoneUsageDescription`이 빠지면 TCC가 프로세스를 SIGABRT로 죽인다. 크래시로 나타나므로
   `plutil -lint`로 빌드 때 잡는 편이 낫다.
+
+---
+
+## 12. 시스템이 이미 쓰는 글리프는 피한다
+
+처음 고른 아이콘 셋은 스피커(`speaker.wave.2`), 해와 달(`sun.max.fill` / `moon.fill`),
+마이크(`mic`)였다. 뜻은 맞는데 메뉴 막대에 올려놓으면 내 앱 아이콘이 **시스템 아이콘처럼 보인다.**
+
+macOS가 자기 항목에 쓰고 있는 것들이라 그렇다.
+
+| 내가 쓰려던 것 | macOS가 이미 쓰는 곳 |
+| --- | --- |
+| `moon.fill` | 집중 모드 |
+| `mic` | "마이크 사용 중" 표시 |
+| `speaker.wave.2` | 제어 센터 사운드 |
+| `wifi`, `battery.*` | 말할 것도 없다 |
+
+겹치면 두 가지를 잃는다. 눌러야 할 것을 못 찾고, 눌렀을 때 무슨 일이 생길지 짐작이 안 된다.
+
+바꾼 셋은 이렇다. 실루엣이 서로 다르고(가로로 넓은 것 / 원 / 세로로 긴 것), 시스템 항목과도 겹치지 않는다.
+
+| 앱 | 대기 | 동작 중 |
+| --- | --- | --- |
+| AudioFix | `speaker.badge.exclamationmark` (bold) | `arrow.triangle.2.circlepath` (bold) |
+| ThemeToggle | `circle.lefthalf.filled` (라이트) | `circle.righthalf.filled` (다크) |
+| MicRecorder | `mic.fill` | `record.circle.fill` (빨강) |
+
+`mic.fill`은 위 표의 "피해야 할 것"에 걸리는 것처럼 보이지만 실제로는 겹치지 않는다. macOS의
+"마이크 사용 중" 표시는 **녹음 중에만** 뜨고, 그때 이 아이콘은 이미 빨간 점이기 때문이다.
+
+고를 때 확인한 것 세 가지.
+
+**심볼이 이 배포 타깃에 있는지 확인한다.** `NSImage(systemSymbolName:)`은 없으면 `nil`을 주고
+조용히 대체 아이콘으로 넘어간다. 개발 기기(macOS 26)에서는 멀쩡한데 14.0에서만 물음표가 뜨는 식이다.
+`arrow.trianglehead.2.clockwise.rotate.90`이 그런 경우여서 구형인 `arrow.triangle.2.circlepath`로 바꿨다.
+
+**정사각형으로 강제하지 않는다. 상자의 가로도 넉넉히 준다.** 심볼마다 고유 비율이 다르다.
+`speaker.badge.exclamationmark`는 원본이 25×17이라 가로로 넓다. 상자를 18×15로 두면 **가로에 먼저
+걸려서** 18×12가 되는데, 옆 아이콘들이 15pt인 자리에 혼자 12pt라 눈에 띄게 작아 보인다.
+상자 가로를 22로 넓히면 22×15가 되어 세로를 다 쓴다. 항목 폭은 `statusItem(withLength: 24)`가
+이미 고정하고 있으므로, 이미지가 커져도 항목이 밀려나지는 않는다.
+
+```swift
+let k = min(maxWidth / img.size.width, maxHeight / img.size.height)
+img.size = NSSize(width: (img.size.width * k).rounded(),
+                  height: (img.size.height * k).rounded())
+```
+
+**굵기(weight)를 올려도 아이콘이 커지지는 않는다.** 획만 두꺼워진다. 실제로 재 보면 효과가 작다.
+
+| `speaker.badge.exclamationmark` | 맞춤 크기 | 칠해지는 픽셀 |
+| --- | --- | --- |
+| regular | 22×15 | 24.2 % |
+| semibold | 22×15 | 24.8 % |
+| bold | 22×15 | 26.9 % |
+
+작아 보이는 문제는 굵기가 아니라 **상자 비율**과 **밝기**(13번)에서 온다. 굵기는 마지막에 조금
+얹는 정도로만 쓴다.
+
+---
+
+## 13. 템플릿 이미지는 시스템 아이콘보다 흐리게 그려진다
+
+두 가지가 걸렸다. 색이 아예 안 먹는 것, 그리고 흑백으로 두어도 시스템 아이콘보다 흐린 것.
+
+### 색이 안 먹는다
+
+README에는 "녹음 중에는 빨간 점"이라고 써 놓고 실제로는 몇 달 동안 빨갛지 않았다. 원인은 한 줄이다.
+
+```swift
+image.isTemplate = true   // macOS 가 이 이미지를 '모양'으로만 쓴다 — 색은 전부 버려진다
+```
+
+템플릿 이미지는 알파 채널만 쓰이고 색은 macOS가 배경(다크·라이트)에 맞춰 칠한다. 그래서 평소에는
+이게 맞다. 색을 쓰려면 템플릿을 꺼야 하고, 그러면 **양쪽 외형에서 다 읽히는 색**을 직접 골라야 한다.
+빨강은 괜찮고, 회색 계열은 한쪽에서 사라진다.
+
+색을 입히는 방법도 함정이 있다. `SymbolConfiguration(hierarchicalColor:)`는 계층마다 투명도를
+다르게 주기 때문에, `record.circle`(링)과 `record.circle.fill`(꽉 찬 점)이 **거의 같아 보인다.**
+링과 점으로 상태를 구분하려던 게 무너진다.
+
+단색으로 확실히 칠하려면 심볼을 그린 뒤 `sourceAtop`으로 덮는다.
+
+```swift
+let out = NSImage(size: base.size)
+let rect = NSRect(origin: .zero, size: base.size)
+out.lockFocus()
+base.draw(in: rect)
+tint.set()
+rect.fill(using: .sourceAtop)   // 그려진 픽셀 위에만 색을 얹는다
+out.unlockFocus()
+out.isTemplate = false
+```
+
+### 흑백으로 둬도 흐리다
+
+색 문제를 고치고 나서도 "눈에 잘 안 들어온다"가 남았다. 같은 스크린샷에서 픽셀 밝기를 재 보고
+원인을 알았다. 배경이 0.19인 어두운 메뉴 막대에서:
+
+| | 획 밝기 |
+| --- | --- |
+| 시스템 아이콘 (Wi-Fi, 제어 센터) | 0.67 |
+| 우리 템플릿 아이콘 | 0.38 |
+| 색을 직접 칠한 아이콘 | 0.72 |
+
+배경을 빼고 보면 템플릿은 시스템 아이콘의 **40% 세기**로만 그려진다. 획을 굵게 해도 이건 안 바뀐다.
+세션 시작 전 원본 코드에서도 같은 값이 나왔으니 원래부터 그랬던 것이고, 메뉴 막대에 있는 다른
+서드파티 앱들도 같은 대역이었다.
+
+그래서 템플릿을 끄고 흑/백을 직접 칠한다. 문제는 **어느 쪽을 칠할지 어떻게 아느냐**다.
+
+**`NSApp.effectiveAppearance`를 보면 틀린다.** 메뉴 막대는 라이트 모드에서도 배경화면이 어두우면
+어둡게 그려진다. 이 맥이 지금 그 상태다 — 시스템은 라이트 모드인데 메뉴 막대는 어둡다.
+앱 외형을 기준으로 검정을 칠하면 어두운 메뉴 막대에 검정 아이콘이 되어 **완전히 사라진다.**
+
+```swift
+// 상태 항목 버튼의 외형을 봐야 한다. 템플릿 이미지가 흑백을 정할 때 쓰는 것과 같은 값이다.
+let dark = item.button?.effectiveAppearance
+    .bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+```
+
+`NSColor.labelColor` 같은 동적 색을 `contentTintColor`에 넣는 것도 안 된다. 그 색은 **앱** 외형에
+맞춰 풀리기 때문에 위와 똑같이 검정이 된다. 실제로 해 보니 아이콘 밝기가 0.19까지 떨어져
+배경과 구분이 안 됐다.
+
+외형은 바뀔 수 있으므로 버튼의 `effectiveAppearance`를 관찰해서 다시 그린다.
+
+```swift
+appearanceObserver = button.observe(\.effectiveAppearance) { [weak self] _, _ in
+    DispatchQueue.main.async { self?.render() }
+}
+```
+
+> **한계 하나.** 색을 구워 넣은 이미지는 하나뿐이라, 디스플레이 두 대의 메뉴 막대 외형이 서로 다르면
+> (라이트 모드에서 한쪽 배경화면만 어두운 경우) 한쪽에만 맞는다. 템플릿은 이 경우도 알아서 처리하지만
+> 대신 항상 흐리다. 둘 다 어두운 게 보통이라 밝기 쪽을 택했다.
+
+잠깐 띄우는 피드백(체크 / 정보 / 경고)도 같은 규칙으로 그린다. 상태색(빨강)만 외형과 무관하게 고정이다.
+
+---
+
+## 14. 상태 항목을 오른쪽 끝에 고정하는 옵션 만들기
+
+2번에서 본 대로, 항목이 넘치면 macOS는 **왼쪽부터** 지운다. 노치 맥에서 외장 모니터를 빼면
+내장 화면 폭이 확 줄어드는데, 이때 살아남는 자리는 오른쪽 끝(제어 센터 옆)뿐이다.
+녹음 표시처럼 "지금 켜져 있다"를 알려야 하는 항목은 거기 있어야 한다.
+
+세 앱 모두 우클릭 메뉴에 켜고 끄는 토글로 넣었다. 켜면 매 실행마다 오른쪽 끝으로 가고,
+끄면 켜기 전 자리로 돌아간다.
+
+위치는 `autosaveName`을 기준으로 앱 도메인 defaults에 저장된다.
+
+```
+NSStatusItem Preferred Position <autosaveName>
+```
+
+값은 **메뉴 막대 오른쪽 끝에서의 거리(pt)**다. 작을수록 오른쪽이고, 0이면 갈 수 있는 가장 오른쪽이다.
+
+```bash
+defaults read kr.leekyusung.MicRecorder
+# "NSStatusItem Preferred Position kr.leekyusung.MicRecorder.status" = 0;
+```
+
+여기서 걸리는 게 넷 있다.
+
+**AppKit은 이 값을 항목을 만들 때만 읽는다.** 이미 떠 있는 항목의 defaults를 바꿔 봐야 안 움직인다.
+옮기려면 항목을 없애고 다시 만들어야 한다.
+
+**`removeStatusItem`이 저장 키를 한 박자 늦게 지운다.** 없애고 → 0을 쓰고 → 새로 만들면 새 항목은
+제대로 오른쪽에 앉는데, 그 직후 옛 항목의 정리 작업이 키를 지워 버린다. 화면은 멀쩡하고 다음 실행에만
+위치가 안 남는다. 잠깐 뒤에 키가 비었으면 다시 써 두는 것으로 해결했다.
+
+```swift
+DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+    if UserDefaults.standard.object(forKey: key) == nil {
+        UserDefaults.standard.set(0, forKey: key)
+    }
+}
+```
+
+**끌 때 되돌릴 자리를 미리 남겨 둔다.** 켜는 순간 저장 위치를 0으로 덮어쓰기 때문에, 그전 값을
+따로 적어 두지 않으면 껐을 때 갈 곳이 없다. 저장된 위치가 아예 없었던 경우도 구분해야 해서
+그때는 -1로 표시하고, 끌 때 위치 키를 지워 macOS가 알아서 놓게 한다.
+
+```swift
+if turningOn {
+    d.set((d.object(forKey: posKey) as? Double) ?? -1, forKey: prePinKey)
+    target = 0
+} else if let before = d.object(forKey: prePinKey) as? Double, before >= 0 {
+    target = before
+} else {
+    target = nil    // 위치 키를 지운다
+}
+```
+
+**옵션이 꺼져 있으면 위치에 손대지 않는다.** ⌘드래그로 옮겨 둔 자리를 앱이 실행할 때마다 되돌리면
+그냥 고장 난 앱이다. 실행 시 강제 배치는 옵션이 켜져 있을 때만 한다.
+
+```swift
+if d.object(forKey: pinKey) == nil { d.set(pinDefault, forKey: pinKey) }
+if d.bool(forKey: pinKey) { d.set(0, forKey: positionKey(name)) }   // 항목을 만들기 전에
+```
+
+실측으로 확인한 동작(macOS 26, 외장 모니터 연결 상태):
+
+| 조작 | 위치 | 저장값 |
+| --- | --- | --- |
+| 켜기 | 321 → 1226 | `PinToRightEnd=1`, `PositionBeforePin=1158` |
+| 끄기 | 1226 → 321 | `PinToRightEnd=0`, 위치 키 1158로 복원 |
+| 켠 채로 재실행 | 오른쪽 끝 유지 | 그대로 |
+
+> 검증할 때는 접근성 좌표를 쓰되 **같은 시점의 제어 센터 좌표와 비교**한다(2번의 주의 참고).
+> 화면이 여러 대면 항목이 어느 디스플레이 기준으로 보고되는지가 상황에 따라 달라진다.

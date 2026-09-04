@@ -14,7 +14,15 @@ enum UI {
     /// 그 자리는 앱 메뉴가 덮고 있어 아이콘이 영영 보이지 않는다.
     /// 그래서 폭을 고정하고, 제목 문자열은 어떤 경우에도 붙이지 않는다.
     static let itemLength: CGFloat = 24
+    /// 아이콘을 담을 상자. 심볼마다 고유 비율이 달라서, 정사각형으로 강제하면 가로로 넓은 심볼
+    /// (speaker.badge.exclamationmark 등)이 눌려 보인다. 비율은 유지한 채 이 상자 안에 맞춘다.
+    /// 항목 폭(24pt)은 statusItem(withLength:) 이 고정하므로 이미지 크기가 폭을 흔들지는 않는다.
+    ///
+    /// 가로 한계를 22 로 둔 이유: `speaker.badge.exclamationmark` 는 원본이 25x17 이다.
+    /// 한계가 18 이면 가로에 먼저 걸려 세로가 12pt 로 깎이고, 15pt 인 옆 아이콘들보다 눈에 띄게 작아진다.
+    /// 22 면 세로를 다 쓴다(22x15). 항목이 24pt 이므로 좌우 1pt 씩은 남는다.
     static let iconSide: CGFloat = 15
+    static let iconMaxWidth: CGFloat = 22
 
     static let symOK = "checkmark.circle.fill"
     static let symInfo = "info.circle"
@@ -216,32 +224,151 @@ func openURLString(_ s: String, whatFailed: String) -> Bool {
 ///     그래서 메뉴는 띄우는 순간에만 붙였다가 곧바로 뗀다.
 ///  2) 버튼에 제목을 붙이면 항목 폭이 늘어나고, 이 맥에서는 그 즉시 아이콘이 메뉴 막대에서
 ///     밀려나 사라진다. 그래서 상태·경과 시간은 전부 툴팁과 메뉴로만 전달한다.
-final class StatusIcon: NSObject {
-    private let item: NSStatusItem
+/// 아이콘이 그릴 한 가지 모습.
+///
+/// `tint` 가 nil 이면 템플릿 이미지로 그린다 — macOS 가 메뉴 막대 배경(다크·라이트)에 맞춰
+/// 알아서 흑백을 뒤집어 준다. 색을 지정하면 템플릿을 끄고 그 색으로 칠하므로 **양쪽 외형에서
+/// 모두 읽히는 색만** 써야 한다(빨강은 괜찮다).
+struct IconLook {
+    let symbol: String
+    let tip: String
+    var tint: NSColor? = nil
+    /// 심볼 획 굵기. 굵게 해도 아이콘이 **커지지는 않고** 선만 두꺼워진다(실측: regular→bold 에서
+    /// 칠해지는 픽셀이 24%에서 27%로). 옆 시스템 아이콘에 묻힐 때 쓴다.
+    var weight: NSFont.Weight = .regular
 
-    /// 현재 상태의 (심볼, 툴팁). 상태는 앱이 소유하고, 아이콘은 그때그때 물어본다.
-    var state: () -> (symbol: String, tip: String) = { (UI.symFallback, "") }
+    init(_ symbol: String, _ tip: String, tint: NSColor? = nil, weight: NSFont.Weight = .regular) {
+        self.symbol = symbol
+        self.tip = tip
+        self.tint = tint
+        self.weight = weight
+    }
+}
+
+final class StatusIcon: NSObject {
+    private var item: NSStatusItem
+    private let autosaveName: String
+
+    /// 현재 상태의 모습. 상태는 앱이 소유하고, 아이콘은 그때그때 물어본다.
+    var state: () -> IconLook = { IconLook(UI.symFallback, "") }
     /// 좌클릭 즉시 동작.
     var onClick: () -> Void = {}
     /// 우클릭·컨트롤클릭에서 띄울 메뉴.
     var buildMenu: () -> NSMenu = { NSMenu() }
 
-    private var flash: (symbol: String, tip: String, until: Date)?
+    private var flash: (look: IconLook, until: Date)?
+    private var appearanceObserver: NSKeyValueObservation?
 
-    override init() {
-        item = NSStatusBar.system.statusItem(withLength: UI.itemLength)
-        super.init()
+    /// - Parameter pinDefault: "오른쪽 끝에 고정" 옵션의 **초기값**. 저장된 설정이 없을 때만 쓴다.
+    ///   노치 맥에서 항목이 넘치면 macOS 는 **왼쪽부터** 자르므로, 오른쪽 끝(제어 센터 바로 왼쪽)이
+    ///   유일하게 안전한 자리다. 항상 보여야 하는 앱은 켠 채로 시작한다.
+    init(pinDefault: Bool = false) {
         // autosaveName 이 없으면 macOS 가 익명 항목에 "Item-N" 을 배정하는데,
         // 이 시스템에는 이미 숨김으로 저장된 "Item-0" 이 있어 그 상태를 물려받을 수 있다.
-        item.autosaveName = "\(Bundle.main.bundleIdentifier ?? "MacTools").status"
-        item.isVisible = true
-        if let b = item.button {
-            b.target = self
-            b.action = #selector(clicked)
-            // 기본값은 .leftMouseUp 뿐이다. 우클릭을 받으려면 명시해야 한다.
-            b.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        }
+        let name = "\(Bundle.main.bundleIdentifier ?? "MacTools").status"
+        autosaveName = name
+
+        let d = UserDefaults.standard
+        if d.object(forKey: Self.pinKey) == nil { d.set(pinDefault, forKey: Self.pinKey) }
+        // 고정이 켜져 있으면 매 실행마다 다시 오른쪽 끝으로 보낸다. 항목을 만들기 **전에** 써야 한다.
+        if d.bool(forKey: Self.pinKey) { d.set(0, forKey: Self.positionKey(name)) }
+
+        item = Self.makeItem(name)
+        super.init()
+        attach()
         render()
+    }
+
+    // MARK: 오른쪽 끝 고정
+
+    /// AppKit 이 autosaveName 항목의 위치를 저장하는 defaults 키(앱 도메인). 값은 메뉴 막대 오른쪽 끝에서의
+    /// 거리(pt)로, 작을수록 오른쪽이다. 0 이면 제어 센터 바로 왼쪽까지 간다. 항목을 **만들 때만** 읽는다.
+    private static func positionKey(_ name: String) -> String { "NSStatusItem Preferred Position \(name)" }
+
+    /// 고정 옵션 on/off.
+    private static let pinKey = "PinToRightEnd"
+    /// 고정을 켜기 직전의 위치. 끌 때 그 자리로 되돌리려고 남긴다. 저장된 위치가 없었으면 -1.
+    private static let prePinKey = "PositionBeforePin"
+
+    /// 우클릭 메뉴의 체크 표시에 쓴다.
+    var isPinnedToRight: Bool { UserDefaults.standard.bool(forKey: Self.pinKey) }
+
+    /// 고정을 켜거나 끈다. 켜면 지금 바로 오른쪽 끝으로 옮기고, 끄면 켜기 전 자리로 되돌린다.
+    func togglePinnedToRight() {
+        let d = UserDefaults.standard
+        let turningOn = !isPinnedToRight
+        let posKey = Self.positionKey(autosaveName)
+
+        let target: Double?
+        if turningOn {
+            // 되돌릴 자리를 남긴다. 저장된 위치가 아예 없었다면 -1 로 그 사실을 기록한다.
+            d.set((d.object(forKey: posKey) as? Double) ?? -1, forKey: Self.prePinKey)
+            target = 0
+        } else if let before = d.object(forKey: Self.prePinKey) as? Double, before >= 0 {
+            target = before
+        } else {
+            target = nil    // 켜기 전에도 정해진 자리가 없었다 → macOS 가 알아서 놓게 둔다
+        }
+
+        d.set(turningOn, forKey: Self.pinKey)
+        rebuild(position: target) { [weak self] in
+            self?.flashOK(turningOn ? "✓ 오른쪽 끝에 고정" : "고정 해제됨")
+        }
+    }
+
+    /// 항목을 없애고 다시 만든다. AppKit 은 저장 위치를 **만들 때만** 읽기 때문이다.
+    /// `position` 이 nil 이면 저장 위치를 지워 macOS 가 알아서 놓게 둔다.
+    /// 우클릭 메뉴의 `performClick` 이 아직 스택에 있을 수 있어 한 턴 미룬 뒤 갈아 끼운다.
+    private func rebuild(position: Double?, then completion: (() -> Void)? = nil) {
+        let key = Self.positionKey(autosaveName)
+        DispatchQueue.main.async { [self] in
+            appearanceObserver = nil            // 옛 버튼을 보던 관찰자는 버린다
+            NSStatusBar.system.removeStatusItem(item)
+            if let p = position { UserDefaults.standard.set(p, forKey: key) }
+            else { UserDefaults.standard.removeObject(forKey: key) }
+
+            item = Self.makeItem(autosaveName)  // 여기서 위치를 읽는다
+            attach()
+            render()
+            completion?()
+
+            // 실측(macOS 26): removeStatusItem 이 autosaveName 의 저장 키를 **한 박자 늦게** 지운다.
+            // 새 항목은 이미 자리를 잡았지만 키가 사라져 다음 실행에 위치가 안 남는다. 다시 써 둔다.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                if let p = position, UserDefaults.standard.object(forKey: key) == nil {
+                    UserDefaults.standard.set(p, forKey: key)
+                }
+            }
+        }
+    }
+
+    private static func makeItem(_ name: String) -> NSStatusItem {
+        let it = NSStatusBar.system.statusItem(withLength: UI.itemLength)
+        it.autosaveName = name
+        it.isVisible = true
+        return it
+    }
+
+    private func attach() {
+        guard let b = item.button else { return }
+        b.target = self
+        b.action = #selector(clicked)
+        // 기본값은 .leftMouseUp 뿐이다. 우클릭을 받으려면 명시해야 한다.
+        b.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        // 색을 직접 칠하므로(아래 menuBarIsDark 참고) 메뉴 막대 외형이 바뀌면 다시 그려야 한다.
+        appearanceObserver = b.observe(\.effectiveAppearance) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.render() }
+        }
+    }
+
+    /// 메뉴 막대가 어두운가.
+    ///
+    /// 기준은 **상태 항목 버튼의** `effectiveAppearance` 다. 메뉴 막대는 라이트 모드에서도 배경화면이
+    /// 어두우면 어둡게 그려지는데, 이 값이 그것까지 반영한다. `NSApp.effectiveAppearance` 를 보면
+    /// 그 경우를 놓쳐서 흰 배경에 흰 아이콘을 그리게 된다.
+    private func menuBarIsDark() -> Bool {
+        guard let a = item.button?.effectiveAppearance else { return true }
+        return a.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
     }
 
     @objc private func clicked() {
@@ -263,30 +390,61 @@ final class StatusIcon: NSObject {
     func flashErr(_ tip: String, seconds: TimeInterval = 4) { setFlash(UI.symErr, tip, seconds) }
 
     private func setFlash(_ s: String, _ t: String, _ sec: TimeInterval) {
-        flash = (s, t, Date().addingTimeInterval(sec))
+        // 잠깐 띄우는 피드백은 항상 템플릿이다 — 배경색을 따라가야 어느 외형에서도 읽힌다.
+        flash = (IconLook(s, t), Date().addingTimeInterval(sec))
         render()
         DispatchQueue.main.asyncAfter(deadline: .now() + sec) { [weak self] in self?.render() }
     }
 
     func render() {
         guard let b = item.button else { return }
-        let symbol: String
-        let tip: String
+        let look: IconLook
         if let f = flash, f.until > Date() {
-            symbol = f.symbol
-            tip = f.tip
+            look = f.look
         } else {
             flash = nil
-            (symbol, tip) = state()
+            look = state()
         }
-        // 심볼 이름이 틀려도 빈 칸이 되지 않도록 대체 아이콘을 둔다.
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)
-            ?? NSImage(systemSymbolName: UI.symFallback, accessibilityDescription: tip)
-        image?.isTemplate = true            // 없으면 한쪽 외형에서 아이콘이 보이지 않는다
-        image?.size = NSSize(width: UI.iconSide, height: UI.iconSide)
-        b.image = image
+        b.image = Self.image(for: look, onDark: menuBarIsDark())
         b.attributedTitle = NSAttributedString(string: "")   // 폭 고정 — 위 주석 참고
-        b.toolTip = tip
+        b.toolTip = look.tip
+    }
+
+    private static func image(for look: IconLook, onDark: Bool) -> NSImage? {
+        // 심볼 이름이 틀리거나 이 macOS 버전에 없어도 빈 칸이 되지 않도록 대체 아이콘을 둔다.
+        guard let raw = NSImage(systemSymbolName: look.symbol, accessibilityDescription: look.tip)
+                ?? NSImage(systemSymbolName: UI.symFallback, accessibilityDescription: look.tip)
+        else { return nil }
+        let base = raw.withSymbolConfiguration(.init(pointSize: UI.iconSide, weight: look.weight)) ?? raw
+
+        // 비율을 지키면서 상자 안에 맞춘다.
+        let s = base.size
+        if s.width > 0, s.height > 0 {
+            let k = min(UI.iconMaxWidth / s.width, UI.iconSide / s.height)
+            base.size = NSSize(width: (s.width * k).rounded(), height: (s.height * k).rounded())
+        }
+
+        // 상태색이 없으면 메뉴 막대 배경에 맞는 흑/백으로 칠한다.
+        //
+        // 여기서 `isTemplate = true` 로 두면 macOS 가 알아서 흑백을 맞춰 주긴 하는데, 그리는 밝기가
+        // 시스템 아이콘의 절반쯤밖에 안 된다. 같은 캡처에서 재 보면 시스템 아이콘 0.67, 템플릿 0.38이다
+        // (macOS 26 실측). 옆에 나란히 두면 우리 것만 흐릿해 보여서 눈에 안 들어온다.
+        // 색을 직접 칠하면 0.72 로 올라 시스템 아이콘과 같은 무게로 읽힌다.
+        let tint = look.tint ?? (onDark ? NSColor.white : NSColor.black)
+
+        // 색을 입힐 때 `SymbolConfiguration(hierarchicalColor:)` 를 쓰면 안 된다. 계층별로 투명도가
+        // 달라져서 `record.circle`(링)과 `record.circle.fill`(꽉 찬 점)이 거의 같아 보인다.
+        // 심볼을 그린 뒤 sourceAtop 으로 덮어 **단색**으로 만들어야 둘이 확실히 구분된다.
+        let out = NSImage(size: base.size)
+        let rect = NSRect(origin: .zero, size: base.size)
+        out.lockFocus()
+        base.draw(in: rect)
+        tint.set()
+        rect.fill(using: .sourceAtop)
+        out.unlockFocus()
+        out.isTemplate = false              // 템플릿이면 macOS 가 마스크로만 써서 색이 사라진다
+        out.accessibilityDescription = look.tip
+        return out
     }
 }
 
@@ -305,6 +463,12 @@ func addItem(_ menu: NSMenu,
     mi.state = checked ? .on : .off
     menu.addItem(mi)
     return mi
+}
+
+/// 세 앱이 똑같이 다는 "오른쪽 끝에 고정" 토글. 문구가 갈리지 않도록 여기에 둔다.
+@discardableResult
+func addPinRightItem(_ menu: NSMenu, _ icon: StatusIcon, target: AnyObject, _ selector: Selector) -> NSMenuItem {
+    addItem(menu, "메뉴 막대 오른쪽 끝에 고정", target: target, selector, checked: icon.isPinnedToRight)
 }
 
 func addDisabledLine(_ menu: NSMenu, _ title: String) {

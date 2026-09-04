@@ -11,19 +11,31 @@ drops down, no confirmation.
 
 | App | Left-click | Permissions |
 | --- | --- | --- |
-| 🔊 **AudioFix** | Restarts `coreaudiod` — fixes crackling audio and output devices that won't connect | Admin password (can be waived, opt-in) |
-| ◐ **ThemeToggle** | Switches between Dark and Light appearance | Automation (System Events) |
-| 🎤 **MicRecorder** | Starts / stops recording | Microphone, Downloads folder |
+| **AudioFix** — speaker with a warning badge | Restarts `coreaudiod` — fixes crackling audio and output devices that won't connect | Admin password (can be waived, opt-in) |
+| **ThemeToggle** — half-filled circle | Switches between Dark and Light appearance | Automation (System Events) |
+| **MicRecorder** — filled microphone | Starts / stops recording | Microphone, Downloads folder |
 
 **Right-click** (or control-click) opens a small settings menu.
 
 ![Right-click menu](screenshots/audiofix-menu.png)
 
-The icon *is* the state. ThemeToggle shows a sun or a moon depending on the current appearance;
-MicRecorder shows a microphone when idle and a red dot while recording. Elapsed time and status messages
-live in the tooltip and the right-click menu only — putting text in the menu bar widens the item, and a
-widened item gets pushed off the menu bar entirely.
-([why](docs/macos-notes.md))
+The icon *is* the state. ThemeToggle fills the half of the circle that matches the current appearance;
+AudioFix spins a refresh arrow while it restarts; MicRecorder is a microphone when idle and a solid red
+dot while recording. Elapsed time and status messages live in the tooltip and the right-click menu
+only — putting text in the menu bar widens the item, and a widened item gets pushed off the menu bar
+entirely. ([why](docs/macos-notes.md))
+
+The icons are drawn in an explicit black or white rather than as template images. A template image in the
+menu bar is drawn at roughly 40 % of the strength macOS gives its own items, which makes a third-party
+icon look washed out next to Wi-Fi and Control Center. ([why](docs/macos-notes.md))
+
+Every app's right-click menu has a **Pin to the right end of the menu bar** toggle. When items overflow,
+macOS drops the leftmost ones, so the right end — next to Control Center — is the only spot that survives
+on a notched MacBook with no external display attached. Turning it on moves the icon there and keeps it
+there on every launch; turning it off puts the icon back where it was before you pinned it.
+
+MicRecorder ships with it on, because a recording indicator you cannot see is useless. The other two
+default to off. ⌘-drag still works as usual while the toggle is off.
 
 ---
 

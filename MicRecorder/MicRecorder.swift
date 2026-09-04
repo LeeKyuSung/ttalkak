@@ -288,13 +288,17 @@ final class MicRecorderDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppMeta.displayName = "녹음"
 
-        icon = StatusIcon()
+        icon = StatusIcon(pinDefault: true)   // 녹음 표시는 내장 화면에서도 항상 보여야 하니 켠 채로 시작
         icon.state = {
+            // 대기는 채운 마이크, 녹음 중은 빨간 점. 모양과 색이 둘 다 달라서 흘깃 봐도 구분된다.
+            // 맨 마이크(mic)는 획이 얇아 옆 시스템 아이콘에 묻힌다 — 채운 것을 쓴다.
+            // macOS 의 "마이크 사용 중" 표시와 글리프가 비슷하지만, 그 표시는 녹음 중에만 뜨고
+            // 그때 이 아이콘은 이미 빨간 점이라 실제로 겹치지 않는다.
             let r = Recorder.shared
-            if r.isRecording { return ("record.circle.fill", "녹음 중 \(r.elapsedString) — 클릭하면 중지") }
-            if r.starting    { return ("record.circle.fill", "시작하는 중…") }
-            if r.stopping    { return ("record.circle.fill", "저장하는 중…") }
-            return ("mic", "녹음 — 클릭하면 시작")
+            if r.isRecording { return IconLook("record.circle.fill", "녹음 중 \(r.elapsedString) — 클릭하면 중지", tint: .systemRed) }
+            if r.starting    { return IconLook("record.circle", "시작하는 중…", tint: .systemRed, weight: .bold) }
+            if r.stopping    { return IconLook("record.circle", "저장하는 중…", tint: .systemRed, weight: .bold) }
+            return IconLook("mic.fill", "녹음 — 클릭하면 시작")
         }
         icon.onClick = { [weak self] in self?.toggleRecording() }
         icon.buildMenu = { [weak self] in self?.menu() ?? NSMenu() }
@@ -486,6 +490,7 @@ final class MicRecorderDelegate: NSObject, NSApplicationDelegate {
         addItem(m, "저장 폴더 열기", target: self, #selector(openFolder))
 
         m.addItem(.separator())
+        addPinRightItem(m, icon, target: self, #selector(togglePinRight))
         addItem(m, "로그인 시 자동 실행", target: self, #selector(toggleLogin),
                 checked: LoginItem.cachedStatus() == .enabled)
         m.addItem(.separator())
@@ -539,6 +544,10 @@ final class MicRecorderDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleLogin() { LoginItem.toggleFromMenu() }
+
+    /// 노치 맥에서 외장 모니터를 빼면 메뉴 막대가 좁아져 왼쪽 항목부터 사라진다.
+    /// 켜 두면 매 실행마다 오른쪽 끝(제어 센터 옆)으로 간다. 끄면 켜기 전 자리로 돌아간다.
+    @objc private func togglePinRight() { icon.togglePinnedToRight() }
 
     @objc private func quit() { NSApp.terminate(nil) }
 }

@@ -104,9 +104,11 @@ final class ThemeToggleDelegate: NSObject, NSApplicationDelegate {
 
         icon = StatusIcon()
         icon.state = {
+            // 반반 채운 원은 외형 전환의 관용 표기다. 해·달을 쓰면 집중 모드 아이콘과 글리프가 똑같아
+            // 메뉴 막대에서 구분이 안 된다. 채워진 쪽이 현재 모드를 가리킨다.
             let dark = Appearance.isDark
-            return (dark ? "moon.fill" : "sun.max.fill",
-                    dark ? "다크 모드 — 클릭하면 라이트로" : "라이트 모드 — 클릭하면 다크로")
+            return dark ? IconLook("circle.righthalf.filled", "다크 모드 — 클릭하면 라이트로")
+                        : IconLook("circle.lefthalf.filled", "라이트 모드 — 클릭하면 다크로")
         }
         icon.onClick = { [weak self] in self?.toggle() }
         icon.buildMenu = { [weak self] in self?.menu() ?? NSMenu() }
@@ -191,12 +193,17 @@ final class ThemeToggleDelegate: NSObject, NSApplicationDelegate {
         addDisabledLine(m, Appearance.isDark ? "현재: 다크 모드" : "현재: 라이트 모드")
         addDisabledLine(m, "좌클릭 = 즉시 전환")
         m.addItem(.separator())
+        addPinRightItem(m, icon, target: self, #selector(togglePinRight))
         addItem(m, "로그인 시 자동 실행", target: self, #selector(toggleLogin),
                 checked: LoginItem.cachedStatus() == .enabled)
         m.addItem(.separator())
         addItem(m, "종료", target: self, #selector(quit))
         return m
     }
+
+    /// 노치 맥에서 외장 모니터를 빼면 메뉴 막대가 좁아져 왼쪽 항목부터 사라진다.
+    /// 켜 두면 매 실행마다 오른쪽 끝(제어 센터 옆)으로 간다. 끄면 켜기 전 자리로 돌아간다.
+    @objc private func togglePinRight() { icon.togglePinnedToRight() }
 
     @objc private func toggleLogin() { LoginItem.toggleFromMenu() }
 
