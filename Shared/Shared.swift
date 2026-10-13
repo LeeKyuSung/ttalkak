@@ -258,6 +258,8 @@ final class StatusIcon: NSObject {
 
     private var flash: (look: IconLook, until: Date)?
     private var appearanceObserver: NSKeyValueObservation?
+    /// 마지막으로 그릴 때의 메뉴 막대 명암. 외형 관찰자가 실제 변화만 골라내는 데 쓴다.
+    private var lastDark: Bool?
 
     /// - Parameter pinDefault: "오른쪽 끝에 고정" 옵션의 **초기값**. 저장된 설정이 없을 때만 쓴다.
     ///   노치 맥에서 항목이 넘치면 macOS 는 **왼쪽부터** 자르므로, 오른쪽 끝(제어 센터 바로 왼쪽)이
@@ -356,8 +358,15 @@ final class StatusIcon: NSObject {
         // 기본값은 .leftMouseUp 뿐이다. 우클릭을 받으려면 명시해야 한다.
         b.sendAction(on: [.leftMouseUp, .rightMouseUp])
         // 색을 직접 칠하므로(아래 menuBarIsDark 참고) 메뉴 막대 외형이 바뀌면 다시 그려야 한다.
+        //
+        // 실측(macOS 26.6.2): render() 가 버튼 image 를 바꾸면 외형이 그대로여도 이 관찰자가 다시 울린다.
+        // 명암이 실제로 바뀐 때만 그리지 않으면 render → 관찰자 → render 로 끝없이 돌아
+        // 앱마다 CPU 코어 하나를 통째로 먹는다(2026-10-14, 세 앱 각 99%).
         appearanceObserver = b.observe(\.effectiveAppearance) { [weak self] _, _ in
-            DispatchQueue.main.async { self?.render() }
+            DispatchQueue.main.async {
+                guard let self, self.menuBarIsDark() != self.lastDark else { return }
+                self.render()
+            }
         }
     }
 
@@ -405,7 +414,9 @@ final class StatusIcon: NSObject {
             flash = nil
             look = state()
         }
-        b.image = Self.image(for: look, onDark: menuBarIsDark())
+        let dark = menuBarIsDark()
+        lastDark = dark
+        b.image = Self.image(for: look, onDark: dark)
         b.attributedTitle = NSAttributedString(string: "")   // 폭 고정 — 위 주석 참고
         b.toolTip = look.tip
     }
