@@ -140,6 +140,16 @@ The recorder also:
 - finalizes the file when the app quits or you log out, so it is never left unplayable
 - keeps whatever was captured when the input device disappears mid-recording, and tells you why it stopped
 - ignores a second click while a recording is still starting, so you never get two overlapping recordings
+- checks the recording every second and, if something is wrong, beeps, shows an alert, and turns the icon
+  into an orange triangle:
+  - **stalled**: the length written to the file has not grown for 5 seconds. The alert offers to start a
+    fresh recording right away
+  - **silent**: the input has been digital silence (at or below -80 dBFS) for 20 seconds — usually a muted
+    mic or a device that delivers no sound
+  - **after stopping**: warns if the saved file is noticeably shorter than the time spent recording
+  - added after a 27-minute recording silently came out as 1.6 seconds, with no error reported (2026-10-27)
+- logs start, problems, and stop to the unified log:
+  `log show --last 1d --predicate 'subsystem == "kr.leekyusung.MicRecorder"'`
 
 ---
 

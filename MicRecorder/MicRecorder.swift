@@ -4,6 +4,11 @@
 
 import AppKit
 import AVFoundation
+import os
+
+/// 녹음 상태 기록. 문제가 생긴 뒤 `log show --predicate 'subsystem == "kr.leekyusung.MicRecorder"'` 로 본다.
+/// 매초 감시 값은 debug 라 저장되지 않고, 시작·문제 발생·종료만 notice 로 남는다.
+let recLog = Logger(subsystem: "kr.leekyusung.MicRecorder", category: "recording")
 
 // MARK: - 상수
 
@@ -36,6 +41,39 @@ enum RecError: KoreanError {
     }
 }
 
+// MARK: - 녹음 감시
+
+/// 녹음은 돌고 있는데 파일에 제대로 쌓이지 않는 상황.
+///
+/// 2026-10-27 실사고: 27분 동안 녹음 중으로 보였는데 파일에는 1.6초만 남았다.
+/// AVFoundation 은 오류 콜백도 주지 않았다. 끝나고 나서야 알면 회의를 통째로 잃으므로 녹음 중에 잡는다.
+enum Trouble: Equatable {
+    /// 파일에 기록되는 길이가 늘지 않는다 — 입력 장치에서 소리가 넘어오지 않는다.
+    case stalled
+    /// 기록은 되지만 입력이 완전한 무음이다 — 음소거, 입력 음량 0, 엉뚱한 장치.
+    case silent
+}
+
+enum Watch {
+    /// 시작 직후 첫 소리가 들어오기까지 기다리는 시간. 블루투스 장치는 수 초 걸린다.
+    static let graceSec: Double = 5
+    /// 기록 길이가 이만큼 늘지 않으면 정지로 본다.
+    static let stallSec: Double = 5
+    /// 입력 최대 레벨(dBFS)이 이 값 이하로 계속되면 무음으로 본다.
+    /// 실측(2026-10-27): 사무실 내장 마이크는 -17에서 -39 dB, 소리 없는 장치(Zoom 가상 장치)는 -758 dB.
+    /// 시스템 입력 음량을 0으로 내려도 내장 마이크 캡처 레벨은 그대로였다.
+    static let silenceDB: Float = -80
+    static let silenceSec: Double = 20
+}
+
+/// 초 → "mm:ss" 또는 "h:mm:ss".
+func durationText(_ sec: Double) -> String {
+    let e = max(0, Int(sec.isFinite ? sec : 0))
+    return e >= 3600
+        ? String(format: "%d:%02d:%02d", e / 3600, (e % 3600) / 60, e % 60)
+        : String(format: "%02d:%02d", e / 60, e % 60)
+}
+
 // MARK: - Recorder
 
 final class Recorder: NSObject, AVCaptureFileOutputRecordingDelegate {
@@ -55,6 +93,17 @@ final class Recorder: NSObject, AVCaptureFileOutputRecordingDelegate {
     private(set) var lastURL: URL?
     private var startedAt = Date()
     private var runtimeError: Error?
+
+    /// 지금 녹음에 쓰는 장치 이름. 경고 문구에 쓴다.
+    private(set) var deviceName = ""
+
+    // 녹음 감시 상태. 전부 메인 스레드에서만 만진다.
+    private(set) var trouble: Trouble?
+    private var lastRecorded: Double = 0
+    private var lastProgressAt = Date()
+    private var silentSince: Date?
+    /// 마지막 녹음이 끝난 시점까지 걸린 시간. 마무리된 파일 길이와 비교하는 데 쓴다.
+    private(set) var finalElapsed: Double = 0
 
     var isBusy: Bool { isRecording || starting || stopping }
 
@@ -146,11 +195,52 @@ final class Recorder: NSObject, AVCaptureFileOutputRecordingDelegate {
 
     // MARK: 경과 시간
 
-    var elapsedString: String {
-        let e = max(0, Int(Date().timeIntervalSince(startedAt)))
-        return e >= 3600
-            ? String(format: "%d:%02d:%02d", e / 3600, (e % 3600) / 60, e % 60)
-            : String(format: "%02d:%02d", e / 60, e % 60)
+    var elapsedSeconds: Double { max(0, Date().timeIntervalSince(startedAt)) }
+
+    var elapsedString: String { durationText(elapsedSeconds) }
+
+    // MARK: 녹음 감시
+
+    /// 지금 파일에 기록된 길이(초).
+    var recordedSeconds: Double {
+        let s = output.recordedDuration.seconds
+        return s.isFinite ? s : 0
+    }
+
+    /// 입력 채널들의 최근 최대 레벨(dBFS). 채널이 없으면 nil.
+    private func inputPeakDB() -> Float? {
+        output.connections.flatMap { $0.audioChannels }.map { $0.peakHoldLevel }.max()
+    }
+
+    /// 녹음 중 1초마다 메인 스레드에서 부른다. 문제 상태가 바뀌었으면 true.
+    func checkHealth(now: Date = Date()) -> Bool {
+        guard isRecording, !stopping else { return false }
+
+        let rec = recordedSeconds
+        if rec > lastRecorded + 0.01 {
+            lastRecorded = rec
+            lastProgressAt = now
+        }
+        let stalled = now.timeIntervalSince(startedAt) >= Watch.graceSec
+            && now.timeIntervalSince(lastProgressAt) >= Watch.stallSec
+
+        let peak = inputPeakDB()
+        if let p = peak, p <= Watch.silenceDB {
+            if silentSince == nil { silentSince = now }
+        } else {
+            silentSince = nil
+        }
+        let silent = silentSince.map { now.timeIntervalSince($0) >= Watch.silenceSec } ?? false
+
+        let elapsed = now.timeIntervalSince(startedAt)
+        let peakText = peak.map { String(format: "%.1f", $0) } ?? "없음"
+        recLog.debug("감시 경과=\(elapsed, format: .fixed(precision: 1)) 기록=\(rec, format: .fixed(precision: 1)) 최대레벨=\(peakText, privacy: .public)")
+
+        let next: Trouble? = stalled ? .stalled : (silent ? .silent : nil)
+        guard next != trouble else { return false }
+        recLog.notice("감시 상태 변경 \(String(describing: self.trouble), privacy: .public) → \(String(describing: next), privacy: .public) 경과=\(elapsed, format: .fixed(precision: 1)) 기록=\(rec, format: .fixed(precision: 1)) 최대레벨=\(peakText, privacy: .public)")
+        trouble = next
+        return true
     }
 
     // MARK: 시작 / 중지
@@ -192,6 +282,12 @@ final class Recorder: NSObject, AVCaptureFileOutputRecordingDelegate {
                 self.starting = false
                 self.stopping = false
                 self.runtimeError = nil
+                self.deviceName = device.localizedName
+                self.trouble = nil
+                self.lastRecorded = 0
+                self.lastProgressAt = self.startedAt
+                self.silentSince = nil
+                recLog.notice("녹음 시작 장치=\(device.localizedName, privacy: .public) (\(device.uniqueID, privacy: .public)) 설정=\(String(describing: self.output.audioSettings), privacy: .public) 파일=\(url.lastPathComponent, privacy: .public)")
                 self.output.startRecording(to: url, outputFileType: .m4a, recordingDelegate: self)
                 self.onStateChange?()
                 completion(nil)
@@ -245,8 +341,11 @@ final class Recorder: NSObject, AVCaptureFileOutputRecordingDelegate {
                 return
             }
             self.sessionQueue.async { [weak self] in self?.session.stopRunning() }
+            self.finalElapsed = Date().timeIntervalSince(self.startedAt)
+            recLog.notice("녹음 종료 경과=\(self.finalElapsed, format: .fixed(precision: 1)) 마지막기록=\(self.lastRecorded, format: .fixed(precision: 1)) 오류=\(error.map { "\($0)" } ?? "없음", privacy: .public)")
             self.isRecording = false
             self.stopping = false
+            self.trouble = nil
             self.currentURL = nil
             self.lastURL = outputFileURL
             self.onStateChange?()
@@ -284,6 +383,10 @@ final class MicRecorderDelegate: NSObject, NSApplicationDelegate {
     private var savedMicMissing = false
     /// 종료 대기 중인가 (녹음 마무리를 기다리는 중).
     private var terminating = false
+    /// 이미 경고창을 띄운 문제. 같은 문제로 거듭 띄우지 않고, 풀렸다가 다시 생기면 다시 알린다.
+    private var alertedTrouble: Trouble?
+    /// 경고창에서 "새로 녹음 시작" 을 눌렀다. 지금 녹음이 마무리되면 바로 새로 시작한다.
+    private var restartPending = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppMeta.displayName = "녹음"
@@ -295,6 +398,12 @@ final class MicRecorderDelegate: NSObject, NSApplicationDelegate {
             // macOS 의 "마이크 사용 중" 표시와 글리프가 비슷하지만, 그 표시는 녹음 중에만 뜨고
             // 그때 이 아이콘은 이미 빨간 점이라 실제로 겹치지 않는다.
             let r = Recorder.shared
+            if r.isRecording, let t = r.trouble {
+                // 빨간 점 대신 주황 삼각형. 녹음은 계속 돌고 있지만 파일에 소리가 쌓이지 않는 상태다.
+                let what = t == .stalled ? "파일에 기록되지 않음" : "입력이 무음"
+                return IconLook("exclamationmark.triangle.fill",
+                                "⚠ 녹음 중 \(r.elapsedString) — \(what). 클릭하면 중지", tint: .systemOrange)
+            }
             if r.isRecording { return IconLook("record.circle.fill", "녹음 중 \(r.elapsedString) — 클릭하면 중지", tint: .systemRed) }
             if r.starting    { return IconLook("record.circle", "시작하는 중…", tint: .systemRed, weight: .bold) }
             if r.stopping    { return IconLook("record.circle", "저장하는 중…", tint: .systemRed, weight: .bold) }
@@ -329,12 +438,80 @@ final class MicRecorderDelegate: NSObject, NSApplicationDelegate {
         let needed = Recorder.shared.isRecording
         if needed, tickTimer == nil {
             // .common 모드가 아니면 메뉴가 열려 있는 동안 멈춘다.
-            let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in self?.icon.render() }
+            let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in self?.tick() }
             RunLoop.main.add(t, forMode: .common)
             tickTimer = t
         } else if !needed {
             tickTimer?.invalidate()
             tickTimer = nil
+        }
+    }
+
+    private func tick() {
+        if Recorder.shared.checkHealth() { troubleChanged() }
+        icon.render()
+    }
+
+    // MARK: 녹음 감시 경고
+
+    private func troubleChanged() {
+        guard let t = Recorder.shared.trouble else {
+            if alertedTrouble != nil { icon.flashOK("✓ 소리가 다시 기록됩니다", seconds: 4) }
+            alertedTrouble = nil
+            return
+        }
+        guard alertedTrouble != t else { return }
+        alertedTrouble = t
+        NSSound.beep()
+
+        // 타이머 콜백 안에서 모달을 돌리지 않는다. 한 턴 미뤄야 아이콘의 경과 시간도 계속 갱신된다.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let r = Recorder.shared
+            let dev = r.deviceName.isEmpty ? "" : "\n입력 장치: \(r.deviceName)"
+            switch t {
+            case .stalled:
+                failAlert("녹음이 파일에 기록되지 않고 있습니다",
+                          "녹음 \(r.elapsedString) 중 파일에는 \(durationText(r.recordedSeconds))만 기록됐고, "
+                          + "그 뒤로 늘지 않습니다.\(dev)\n\n"
+                          + "지금 새로 녹음을 시작하는 것을 권합니다. 지금까지의 파일은 그대로 저장됩니다.",
+                          actionTitle: "새로 녹음 시작", closeTitle: "계속 녹음") { [weak self] in
+                    self?.restartRecording()
+                }
+            case .silent:
+                failAlert("마이크에 소리가 들어오지 않습니다",
+                          "\(Int(Watch.silenceSec))초 넘게 입력이 완전한 무음입니다.\(dev)\n\n"
+                          + "마이크가 음소거됐거나, 소리가 들어오지 않는 장치(가상 장치 등)가 잡혀 있을 수 있습니다. "
+                          + "장치를 바꾸려면 녹음을 중지한 뒤 우클릭 › 입력 장치에서 고르세요.",
+                          closeTitle: "확인")
+            }
+        }
+    }
+
+    /// 지금 녹음을 마무리하고, 끝나는 대로 새 파일로 다시 시작한다.
+    private func restartRecording() {
+        let r = Recorder.shared
+        if r.isRecording {
+            restartPending = true
+            r.stop()
+        } else if !r.isBusy {
+            beginRecording()
+        }
+    }
+
+    /// 마무리된 파일이 녹음한 시간보다 눈에 띄게 짧으면 알린다. 녹음 중 감시를 놓쳤을 때의 마지막 확인이다.
+    private func checkFileLength(url: URL, elapsed: Double) {
+        guard elapsed >= 30 else { return }
+        Task { @MainActor [weak self] in
+            let d = try? await AVURLAsset(url: url).load(.duration)
+            guard let self, let sec = d?.seconds, sec.isFinite else { return }
+            guard sec < elapsed * 0.9, elapsed - sec >= 10 else { return }
+            recLog.notice("파일 길이 부족 경과=\(elapsed, format: .fixed(precision: 1)) 파일=\(sec, format: .fixed(precision: 1))")
+            self.icon.flashErr("파일이 짧게 저장됨", seconds: 6)
+            failAlert("녹음 파일이 녹음한 시간보다 짧습니다",
+                      "녹음은 \(durationText(elapsed)) 동안 했지만 파일에는 \(durationText(sec))만 담겼습니다.\n"
+                      + "입력 장치에서 소리가 중간에 넘어오지 않은 것으로 보입니다.\n\n\(url.path)",
+                      actionTitle: "폴더 열기") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
         }
     }
 
@@ -387,6 +564,7 @@ final class MicRecorderDelegate: NSObject, NSApplicationDelegate {
         Recorder.shared.start(device: device) { [weak self] error in
             guard let self else { return }
             guard let error else {
+                self.alertedTrouble = nil
                 self.icon.flashOK("✓ 녹음 시작")
                 return
             }
@@ -431,11 +609,21 @@ final class MicRecorderDelegate: NSObject, NSApplicationDelegate {
                       "\(avReasonText(error ?? runtime))\n\n\(url.path)")
         }
 
+        alertedTrouble = nil
+        // 경고창에서 새로 시작을 고른 경우다. 이 파일이 짧은 건 이미 알고 있으니 길이 확인은 건너뛴다.
+        let restart = restartPending && !terminating
+        restartPending = false
+        if finishedOK, !restart, !terminating {
+            checkFileLength(url: url, elapsed: Recorder.shared.finalElapsed)
+        }
+
         // 종료를 기다리던 중이었다면 이제 보내 준다.
         if terminating {
             terminating = false
             NSApp.reply(toApplicationShouldTerminate: true)
         }
+
+        if restart { beginRecording() }
     }
 
     // MARK: 종료 처리
