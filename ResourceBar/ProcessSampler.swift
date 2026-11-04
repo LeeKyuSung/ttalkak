@@ -66,9 +66,13 @@ struct ProcStat {
     var systemStartKey: UInt64 = 0
 
     var isMine: Bool { uid == getuid() }
-    /// 종료 버튼을 켤 수 있는가: 내 계정 소유이고 kernel_task(0)·launchd(1)·이 앱 자신이 아님
+    /// 로그인 세션 자체(loginwindow). 내 계정 소유라 종료할 수는 있지만, 종료하면 그 자리에서 로그아웃된다.
+    /// 같은 이름의 다른 프로세스까지 막혀도 해가 없으므로 이름으로만 본다.
+    /// Dock·Finder·ControlCenter·SystemUIServer는 막지 않는다: macOS가 곧바로 다시 띄우므로 멈췄을 때 다시 띄우는 데 쓴다.
+    var endsSession: Bool { name == "loginwindow" }
+    /// 종료 버튼을 켤 수 있는가: 내 계정 소유이고 kernel_task(0)·launchd(1)·이 앱 자신·loginwindow가 아님
     /// (kill(0, …)은 프로세스 그룹 전체로 간다. 앱을 root로 띄우면 0·1도 isMine이 된다). 시스템 줄은 늘 끈다
-    var canKill: Bool { !isSystem && isMine && pid > 1 && pid != getpid() }
+    var canKill: Bool { !isSystem && isMine && pid > 1 && pid != getpid() && !endsSession }
 }
 
 /// 표본 두 개로 만든 목록 결과

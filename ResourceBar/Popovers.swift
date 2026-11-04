@@ -193,7 +193,7 @@ private final class ProcessRowView: NSView {
         }
         systemTag.isHidden = true
         killButton.isHidden = false
-        // 내 계정 소유가 아닌 프로세스는 종료할 수 없다. kernel_task·launchd·이 앱 자신도 막는다(ProcStat.canKill)
+        // 내 계정 소유가 아닌 프로세스는 종료할 수 없다. kernel_task·launchd·이 앱 자신·loginwindow도 막는다(ProcStat.canKill)
         killButton.isEnabled = p.canKill
         if p.canKill {
             killButton.toolTip = "SIGTERM으로 종료"
@@ -201,6 +201,8 @@ private final class ProcessRowView: NSView {
             killButton.toolTip = "다른 계정의 프로세스라 종료할 수 없음"
         } else if p.pid == getpid() {
             killButton.toolTip = "ResourceBar 자신은 오른쪽 클릭 메뉴의 종료로 끝냅니다"
+        } else if p.endsSession {
+            killButton.toolTip = "로그인 세션 자체라 종료하면 그 자리에서 로그아웃되므로 막아 둠"
         } else {
             killButton.toolTip = "시스템 프로세스라 종료할 수 없음"
         }

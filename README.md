@@ -165,7 +165,7 @@ graphs, and upload / download speed. It updates every second and needs no permis
   purgeable is not counted as free, so the number does not swing the way it does in some monitors.
 - **Left-click a widget** to open its detail panel: a five-minute graph (SSD shows a usage line instead),
   and for CPU, memory and SSD the eight processes using the most, each with a quit button (SIGTERM after a
-  confirmation).
+  confirmation). The button is off for `loginwindow`, because quitting it logs you out on the spot.
 - **Other accounts' processes.** An ordinary app cannot read the CPU and memory usage of processes that
   belong to root or `_windowserver`, so ResourceBar hands just those PIDs to `/bin/ps`: every two seconds
   while a CPU or memory panel is open, and twice for each spike-log line. They are marked *(시스템)* and
