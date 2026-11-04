@@ -2,7 +2,7 @@
 
 [English](README.md) · 한국어
 
-한 가지 일만 하는 macOS 메뉴 막대 앱 세 개. **좌클릭하면 바로 실행된다.** 메뉴가 안 뜬다.
+한 가지 일만 하는 macOS 메뉴 막대 앱 네 개. **좌클릭하면 바로 실행된다.** 메뉴가 안 뜬다.
 
 ![메뉴 막대 아이콘](screenshots/menubar-icons.png)
 
@@ -11,6 +11,7 @@
 | **AudioFix** (오디오 재시작) — 느낌표 붙은 스피커 | `coreaudiod` 재시작 — 소리가 치직거리거나 출력 장치가 안 잡힐 때 | 관리자 암호 (1회 설정으로 생략 가능) |
 | **ThemeToggle** (다크·라이트) — 반만 채운 원 | 시스템 외형 즉시 전환 | 자동화 (System Events) |
 | **MicRecorder** (녹음) — 채운 마이크 | 녹음 시작 / 중지 | 마이크, 다운로드 폴더 |
+| **ResourceBar** (리소스 모니터) — SSD 막대, GPU·CPU·메모리 그래프, 네트워크 속도 | 누른 위젯의 상세 창 | 없음 |
 
 **우클릭**(또는 컨트롤+클릭)하면 설정 메뉴가 열린다.
 
@@ -25,11 +26,12 @@
 자기 항목에 주는 밝기의 40% 정도로만 그려져서, Wi-Fi나 제어 센터 옆에 두면 우리 것만 흐릿해 보인다.
 ([왜 그런지](docs/macos-notes.md#13-템플릿-이미지는-시스템-아이콘보다-흐리게-그려진다))
 
-세 앱 모두 우클릭 메뉴에 **메뉴 막대 오른쪽 끝에 고정** 토글이 있다. 항목이 넘치면 macOS는 왼쪽부터
+네 앱 모두 우클릭 메뉴에 **메뉴 막대 오른쪽 끝에 고정** 토글이 있다. 항목이 넘치면 macOS는 왼쪽부터
 지우기 때문에, 외장 모니터를 뺀 노치 맥에서 살아남는 자리는 제어 센터 옆 오른쪽 끝뿐이다. 켜면 지금
 바로 그 자리로 옮기고 매 실행마다 유지하며, 끄면 켜기 전 자리로 되돌린다.
 
-MicRecorder만 켠 채로 나온다. 안 보이는 녹음 표시는 쓸모가 없기 때문이다. 나머지 둘은 꺼져 있다.
+MicRecorder와 ResourceBar는 켠 채로 나온다. 안 보이는 녹음 표시는 쓸모가 없고, ResourceBar는 폭이
+228pt라 노치 화면에서는 오른쪽 끝 말고 들어갈 자리가 없기 때문이다. 나머지 둘은 꺼져 있다.
 꺼져 있는 동안에는 ⌘드래그로 평소처럼 옮길 수 있다.
 
 ---
@@ -44,10 +46,10 @@ MicRecorder만 켠 채로 나온다. 안 보이는 녹음 표시는 쓸모가 �
 ```bash
 git clone https://github.com/LeeKyuSung/ttalkak.git
 cd ttalkak
-bash build.sh                    # 셋 다
+bash build.sh                    # 전부
 bash build.sh MicRecorder        # 하나만
 
-for a in AudioFix ThemeToggle MicRecorder; do
+for a in AudioFix ThemeToggle MicRecorder ResourceBar; do
   ditto "build/$a.app" "/Applications/$a.app" && open "/Applications/$a.app"
 done
 ```
@@ -71,13 +73,14 @@ BUNDLE_PREFIX=com.example bash build.sh
 ### 제거
 
 앱을 종료하고 `/Applications`에서 지우면 된다. AudioFix의 sudoers 설정을 했다면
-[docs/sudoers.md](docs/sudoers.md#손으로-되돌리기)를 보고 함께 되돌린다.
+[docs/sudoers.md](docs/sudoers.md#손으로-되돌리기)를 보고 함께 되돌린다. ResourceBar 기록은 홈 폴더의
+`Library/Logs/ResourceBar`에 남으니 필요하면 함께 지운다.
 
 ---
 
 ## 권한
 
-앱이 셋으로 나뉘어 있어 권한도 앱별로 따로 허용해야 한다.
+앱이 나뉘어 있어 권한도 앱별로 따로 허용해야 한다.
 
 | 앱 | 권한 | 위치 | 언제 물어보나 |
 | --- | --- | --- | --- |
@@ -85,6 +88,7 @@ BUNDLE_PREFIX=com.example bash build.sh
 | MicRecorder | 마이크 | 설정 › 개인정보 보호 및 보안 › 마이크 | 첫 녹음 클릭 |
 | MicRecorder | 다운로드 폴더 | 설정 › 개인정보 보호 및 보안 › 파일 및 폴더 | 첫 저장 |
 | AudioFix | 없음 (관리자 암호만) | — | — |
+| ResourceBar | 없음 | — | — |
 
 거부해도 조용히 실패하지 않는다. 해당 설정 화면으로 바로 가는 버튼이 붙은 안내가 뜬다.
 
@@ -116,6 +120,34 @@ AirPods 같은 블루투스 기기를 입력으로 잡으면 HFP로 내려가 �
   - **끝난 뒤 확인**: 저장된 파일이 녹음한 시간보다 눈에 띄게 짧으면 알린다
   - 오류 없이 27분 녹음이 1.6초만 남은 일(2026-10-27)이 있어 넣었다
 - 시작·문제 발생·종료를 시스템 로그에 남긴다: `log show --last 1d --predicate 'subsystem == "kr.leekyusung.MicRecorder"'`
+
+---
+
+## 리소스 모니터 (ResourceBar)
+
+메뉴 막대 한 칸(228pt)에 왼쪽부터 SSD 사용률 막대, GPU·CPU·메모리 1분 그래프, 업로드·다운로드 속도를
+그린다. 1초마다 갱신하고 권한이 필요 없다.
+
+- **SSD**는 실제 사용률(`/System/Volumes/Data`의 `1 - f_bavail / f_blocks`)이다. macOS가 "비울 수 있다"고
+  하는 공간을 여유로 치지 않아서, 일부 모니터처럼 숫자가 들쭉날쭉하지 않다.
+- **위젯을 좌클릭**하면 그 위젯의 상세 창이 열린다. SSD를 뺀 위젯은 5분 그래프가 나오고(SSD는 사용량
+  한 줄), CPU·메모리·SSD는 많이 쓰는 프로세스 8개와 종료 버튼(확인 뒤 SIGTERM)이 나온다.
+- **다른 계정의 프로세스**(root, `_windowserver` 등)는 일반 앱이 사용량을 읽을 수 없다. 그래서 CPU·메모리
+  창이 열려 있는 동안 2초마다, 그리고 기록 줄을 남길 때 그 PID들만 `/bin/ps`로 받아 합친다. 그 줄은 *(시스템)* 표시가 붙고 종료할
+  수 없다. `ps`는 활성 상태 보기의 footprint가 아니라 RSS를 줘서 메모리가 작게 나오고(WindowServer 107MB,
+  활성 상태 보기 549MB), `kernel_task`는 `ps`에도 보이지 않는다.
+- **기록**: CPU나 GPU가 80%를 10초 넘기거나 메모리 압박이 "경고"가 되면, 그 순간 많이 쓰는 프로세스를
+  홈 폴더의 `Library/Logs/ResourceBar/spikes-YYYY-MM-DD.jsonl`에 JSON 한 줄로 남긴다. CPU·GPU·압박
+  "위험"은 이어지는 동안 60초마다, "경고"만 있으면 10분마다 남긴다(경고가 평상시인 맥이 많다). 30일
+  지난 파일은 지운다.
+- **비용**: 같은 맥에서 같은 시간대에 [Stats](https://github.com/exelban/stats)와 함께 쟀다(화면 2대, 코어
+  하나 기준). ResourceBar 약 1%, Stats 5.2%에서 6.0%. 메모리 13MB 대 201MB. CPU·메모리 상세 창을 열어
+  둔 동안은 1.4에서 1.9%p가 더 들고, 그중 약 0.5가 `ps`다.
+- 그리기 비용의 대부분은 그리기 자체가 아니다. 화면이 2대면 칸을 다시 그릴 때마다 AppKit이 그 칸을
+  다른 화면용으로 다시 찍는다. 그래서 넓은 칸 하나가 좁은 칸 다섯 개보다 훨씬 싸다.
+
+`--login-item on|off`로 메뉴를 거치지 않고 로그인 항목을 켜고 끌 수 있다(설치 스크립트용). 위 숫자를 잰
+측정용 인자와 설계 메모는 [docs/resourcebar.md](docs/resourcebar.md)에 있다.
 
 ---
 
@@ -160,16 +192,19 @@ ttalkak/
 ├── AudioFix/AudioFix.swift
 ├── ThemeToggle/ThemeToggle.swift
 ├── MicRecorder/MicRecorder.swift
+├── ResourceBar/                 ResourceBar.swift(진입점)와 값 읽기·상세 창·기록·그리기
 ├── build.sh
 └── docs/
     ├── macos-notes.md           만들면서 부딪힌 macOS 제약들
+    ├── resourcebar.md           ResourceBar 설계 메모와 측정
     └── sudoers.md               권한 설계와 되돌리는 법
 ```
 
-의존성 없음. 각 앱은 `Shared.swift` + 자기 파일을 `swiftc` 한 번으로 컴파일한다.
+의존성 없음. 각 앱은 `Shared.swift` + 자기 폴더의 파일(ResourceBar 말고는 한 개)을 `swiftc` 한 번으로 컴파일한다.
 Xcode 프로젝트도 SwiftPM도 쓰지 않는다.
 
-`Shared.swift`의 `StatusIcon`이 클릭 구분을 담당한다. 핵심은 `statusItem.menu`를 **평상시 비워 두는**
+`Shared.swift`의 `StatusIcon`이 클릭 구분을 담당한다(ResourceBar는 아이콘이 아니라 직접 그린 칸이라
+`AppController`에서 같은 방식으로 한다). 핵심은 `statusItem.menu`를 **평상시 비워 두는**
 것이다 — 메뉴를 계속 달아 두면 좌클릭도 메뉴를 열어버려 "즉시 실행"이 사라진다.
 
 ---
@@ -178,6 +213,7 @@ Xcode 프로젝트도 SwiftPM도 쓰지 않는다.
 
 - **[docs/macos-notes.md](docs/macos-notes.md)** — SIP, 노치 뒤로 사라지는 아이콘, TCC와 코드 서명,
   파이프 교착, 녹음 파일 마무리 등 만들면서 부딪힌 것들
+- **[docs/resourcebar.md](docs/resourcebar.md)** — ResourceBar 설계, 기록 규칙, Stats와 비교한 측정
 - **[docs/sudoers.md](docs/sudoers.md)** — sudoers를 안전하게 건드리는 법
 
 ## 라이선스

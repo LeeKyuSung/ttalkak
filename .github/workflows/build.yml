@@ -22,7 +22,7 @@ jobs:
       # CI has no Apple Development certificate, so the build falls back to
       # ad-hoc signing. That is fine here — we only care that it compiles and
       # that the bundles are well formed.
-      - name: Build all three apps
+      - name: Build all apps
         env:
           SIGN_ID: "-"
         run: bash build.sh
@@ -30,7 +30,7 @@ jobs:
       - name: Verify bundles
         run: |
           set -euo pipefail
-          for a in AudioFix ThemeToggle MicRecorder; do
+          for a in AudioFix ThemeToggle MicRecorder ResourceBar; do
             app="build/$a.app"
             echo "--- $a ---"
             test -x "$app/Contents/MacOS/$a"
@@ -43,10 +43,10 @@ jobs:
           codesign -d --entitlements - build/MicRecorder.app 2>&1 \
             | grep -q 'com.apple.security.device.audio-input'
 
-      - name: The other two must not request it
+      - name: The others must not request it
         run: |
           set -euo pipefail
-          for a in AudioFix ThemeToggle; do
+          for a in AudioFix ThemeToggle ResourceBar; do
             if codesign -d --entitlements - "build/$a.app" 2>&1 \
                  | grep -q 'com.apple.security.device.audio-input'; then
               echo "$a should not request microphone access" >&2

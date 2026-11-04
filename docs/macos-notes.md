@@ -490,7 +490,7 @@ appearanceObserver = button.observe(\.effectiveAppearance) { [weak self] _, _ in
 내장 화면 폭이 확 줄어드는데, 이때 살아남는 자리는 오른쪽 끝(제어 센터 옆)뿐이다.
 녹음 표시처럼 "지금 켜져 있다"를 알려야 하는 항목은 거기 있어야 한다.
 
-세 앱 모두 우클릭 메뉴에 켜고 끄는 토글로 넣었다. 켜면 매 실행마다 오른쪽 끝으로 가고,
+네 앱 모두 우클릭 메뉴에 켜고 끄는 토글로 넣었다(ResourceBar는 `StatusSlot`에서 같은 방식으로). 켜면 매 실행마다 오른쪽 끝으로 가고,
 끄면 켜기 전 자리로 돌아간다.
 
 위치는 `autosaveName`을 기준으로 앱 도메인 defaults에 저장된다.

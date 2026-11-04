@@ -1,7 +1,7 @@
-// Shared.swift — 세 개의 메뉴 막대 앱(AudioFix / ThemeToggle / MicRecorder)이 함께 쓰는 코드.
+// Shared.swift — 메뉴 막대 앱들(AudioFix / ThemeToggle / MicRecorder / ResourceBar)이 함께 쓰는 코드.
 //
 // 여기에는 앱별 로직을 두지 않는다. 프로세스 실행, 관리자 권한 실행, 알림, 메뉴 막대 아이콘,
-// 로그인 항목처럼 세 앱이 똑같이 필요로 하는 것만 둔다.
+// 로그인 항목처럼 여러 앱이 똑같이 필요로 하는 것만 둔다.
 
 import AppKit
 import ServiceManagement

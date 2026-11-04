@@ -1,8 +1,8 @@
 #!/bin/bash
 #
-# 세 개의 메뉴 막대 앱을 빌드한다. 몇 번을 다시 실행해도 같은 결과가 나온다.
+# 메뉴 막대 앱들을 빌드한다. 몇 번을 다시 실행해도 같은 결과가 나온다.
 #
-#   ./build.sh                    # 셋 다 빌드
+#   ./build.sh                    # 전부 빌드
 #   ./build.sh MicRecorder        # 하나만 빌드
 #   SIGN_ID="-" ./build.sh        # 강제 ad-hoc 서명 (TCC 권한이 매 빌드마다 초기화됨)
 #
@@ -41,11 +41,13 @@ SDK_PATH="$(xcrun --show-sdk-path --sdk macosx)"
 build_app() {
   local name="$1" display="$2" needs_mic="$3" needs_ae="$4"
   local bundle_id="$BUNDLE_PREFIX.$name"
-  local src="$ROOT/$name/$name.swift"
+  local src="$ROOT/$name/$name.swift"   # @main 이 있는 파일
   local app="$BUILD/$name.app"
   local ent="$BUILD/$name.entitlements"
 
   [ -f "$src" ] || { echo "FATAL: 소스가 없습니다: $src" >&2; return 1; }
+  # 앱 폴더의 .swift 를 모두 넣는다. 파일 하나짜리 앱은 위 파일 하나, ResourceBar 는 여러 개다.
+  local srcs=("$ROOT/$name"/*.swift)
 
   rm -rf "$app"
   mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
@@ -82,13 +84,13 @@ build_app() {
   plutil -lint "$app/Contents/Info.plist" >/dev/null
 
   # -framework 플래그는 필요 없다. import 만으로 autolink 된다.
-  # 공용 파일과 앱 파일을 한 번에 컴파일한다 (@main 은 앱 파일에만 있다).
+  # 공용 파일과 앱 폴더의 파일을 한 번에 컴파일한다 (@main 은 앱 이름과 같은 파일에만 있다).
   swiftc -parse-as-library -O -whole-module-optimization \
     -target "arm64-apple-macos$DEPLOY" \
     -sdk "$SDK_PATH" \
     -module-name "$name" \
     -o "$app/Contents/MacOS/$name" \
-    "$SHARED" "$src"
+    "$SHARED" "${srcs[@]}"
 
   # Hardened Runtime(--options runtime) 아래에서 마이크에 접근하려면
   # com.apple.security.device.audio-input 이 반드시 있어야 한다. 없으면 TCC 가 동의 대화상자조차
@@ -139,12 +141,14 @@ case "$TARGET" in
     build_app AudioFix    "오디오 재시작" no  no
     build_app ThemeToggle "다크·라이트"   no  yes
     build_app MicRecorder "녹음"          yes no
+    build_app ResourceBar "리소스 모니터" no  no
     ;;
   AudioFix)    build_app AudioFix    "오디오 재시작" no  no ;;
   ThemeToggle) build_app ThemeToggle "다크·라이트"   no  yes ;;
   MicRecorder) build_app MicRecorder "녹음"          yes no ;;
+  ResourceBar) build_app ResourceBar "리소스 모니터" no  no ;;
   *)
-    echo "알 수 없는 대상: $TARGET (AudioFix | ThemeToggle | MicRecorder | all)" >&2
+    echo "알 수 없는 대상: $TARGET (AudioFix | ThemeToggle | MicRecorder | ResourceBar | all)" >&2
     exit 1
     ;;
 esac
@@ -153,7 +157,7 @@ echo
 echo "빌드 위치: $BUILD"
 echo
 echo "설치:"
-echo "  for a in AudioFix ThemeToggle MicRecorder; do"
+echo "  for a in AudioFix ThemeToggle MicRecorder ResourceBar; do"
 echo "    ditto \"$BUILD/\$a.app\" \"/Applications/\$a.app\" && open \"/Applications/\$a.app\""
 echo "  done"
 echo
