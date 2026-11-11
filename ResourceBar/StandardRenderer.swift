@@ -88,6 +88,8 @@ private final class StandardBarView: NSView {
     // MARK: 그릴 상태
 
     private var ssdLevel = -1
+    /// SSD 막대 색 단계. 0 파랑(80% 미만) · 1 주황(80% 이상) · 2 빨강(90% 이상)
+    private var ssdTier = -1
     /// gpu, cpu, ram 순. 그래프 점 높이(quantum 단위)
     private var chartLevels: [[Int32]] = [[], [], []]
     private var chartPaths: [(line: CGPath, fill: CGPath)?] = [nil, nil, nil]
@@ -177,9 +179,12 @@ private final class StandardBarView: NSView {
 
         // SSD: 채움 높이
         let ssdInner = g.boxes[WidgetKind.ssd.rawValue].insetBy(dx: Self.hair, dy: Self.hair)
-        let level = Int((Self.clamp01(f.ssdUsed) * ssdInner.height / quantum).rounded())
-        if level != ssdLevel {
+        let used = Self.clamp01(f.ssdUsed)
+        let level = Int((used * ssdInner.height / quantum).rounded())
+        let tier = used >= 0.9 ? 2 : (used >= 0.8 ? 1 : 0)
+        if level != ssdLevel || tier != ssdTier {
             ssdLevel = level
+            ssdTier = tier
             setNeedsDisplay(g.frames[WidgetKind.ssd.rawValue])
         }
 
@@ -263,7 +268,7 @@ private final class StandardBarView: NSView {
         if h > 0 {
             ctx.saveGState()
             clipInner(inner, ctx: ctx)
-            NSColor.systemBlue.setFill()
+            (ssdTier >= 2 ? NSColor.systemRed : (ssdTier == 1 ? NSColor.systemOrange : NSColor.systemBlue)).setFill()
             ctx.fill(CGRect(x: inner.minX, y: inner.minY, width: inner.width, height: h))
             ctx.restoreGState()
         }

@@ -162,7 +162,8 @@ One 228 pt item that draws, left to right, SSD usage as a bar, GPU, CPU and memo
 graphs, and upload / download speed. It updates every second and needs no permissions.
 
 - **SSD** is real usage, `1 - f_bavail / f_blocks` on `/System/Volumes/Data`. Space macOS calls
-  purgeable is not counted as free, so the number does not swing the way it does in some monitors.
+  purgeable is not counted as free, so the number does not swing the way it does in some monitors. The
+  bar is blue below 80%, orange from 80% and red from 90%.
 - **Left-click a widget** to open its detail panel: a five-minute graph (SSD shows a usage line instead),
   and for CPU, memory and SSD the eight processes using the most, each with a quit button (SIGTERM after a
   confirmation). The button is off for `loginwindow`, because quitting it logs you out on the spot.
