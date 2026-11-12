@@ -8,7 +8,7 @@ macOS 26.6, 화면 2대(내장 + 외장) 기준이다.
 
 | 위젯 | 값 | 모양 |
 |---|---|---|
-| SSD | 실제 사용률 = 1 - f_bavail/f_blocks (`/System/Volumes/Data`). 비울 수 있는 공간을 여유로 치지 않는다 | 세로 막대, systemBlue |
+| SSD | 실제 사용률 = 1 - f_bavail/f_blocks (`/System/Volumes/Data`). 비울 수 있는 공간을 여유로 치지 않는다 | 세로 막대. 80% 미만 systemBlue, 80% 이상 systemOrange, 90% 이상 systemRed |
 | GPU | IOAccelerator `PerformanceStatistics`의 `Device Utilization %` | 선 그래프 + 반투명 채움, systemBlue |
 | CPU | 전체 코어 평균 사용률(`host_statistics`의 tick 차이) | 선 그래프 + 반투명 채움, systemBlue |
 | RAM | (앱 메모리 + 고정 + 압축) / 전체 | 선 그래프 + 반투명 채움, systemOrange |
